@@ -1,27 +1,49 @@
-# require 'wikipedia'
+require 'mediawiki_api'
+require 'active_support/core_ext/date/calculations.rb'
+
 require_relative 'hash_path'
 
 class Trbial
-  attr_reader :events
+  attr_reader :events, :days
   COMMENT_OPEN = "<!--"
   COMMENT_CLOSE = "-->"
+
   def initialize(days=7)
-    date = Time.now
-    # fetch_wiki_text
+    @days = days
+
     @events = {}
-    # Will follow the hierarchy:
+    # @events will follow the hierarchy:
     #   Category
-    #     Event
-    #       Event details/updates
+    #     Heading (path)
+    #       Event details
+  end
+
+  def retrieve_events
+    date = Date.current
+    (@days - 1).downto(0) do |days|
+      date = Date.current.days_ago(days)
+      retrieve_event(date)
+    end
+  end
+  
+  def retrieve_event(date=Date.current)
+    initialize_wiki_client
+    response = @client.get_wikitext(wiki_url(date))
+    parse_wiki_page(response)
+    log "Finished #{ date.to_s }"
   end
 
 protected
-  def parse_wiki_page(page, id)
-    @events = {}
+  def initialize_wiki_client
+    @client ||= MediawikiApi::Client.new "https://en.wikipedia.org/w/api.php"
+  end
+
+  def parse_wiki_page(response)
+    page = response.body
     open_comment = true
     current_category, current_level, current_heading = nil, 0, HashPath.new
-    page.each do |line|
-      line.scrub! # verify that this is necessary when pulling from web, not file
+    page.each_line do |line|
+      # line.scrub! # verify that this is necessary when pulling from web, not file
       line.strip!
       next unless line.length > 0
       
@@ -66,9 +88,7 @@ protected
           end
           if level > current_level
             current_heading = HashPath.descend(current_heading, heading)
-          elsif level == current_level
-            
-          else # level < current_level
+          else
             current_heading = HashPath.up_to(current_heading, level - 1)
             current_heading.descend!(heading)
           end
@@ -80,25 +100,27 @@ protected
         if match
           level, text = match.captures
           unless text
-            puts "matched bullet, not text for line: #{ line }"
+            log "matched bullet, not text for line: #{ line }"
             next
           end
           level = level.length
           text.strip!
           if current_heading.pos != level
-            puts("Mismatched levels. Heading pos: #{ current_heading.pos }, level: #{ level } for\n  '#{ line }'")
+            # log "Mismatched levels. Heading pos: #{ current_heading.pos }, level: #{ level } for\n  '#{ line }'"
             current_heading = HashPath.up_to(current_heading, level - 1)
             @events[current_category][current_heading] ||= []
           end
           @events[current_category][current_heading] << text
         else
-          puts "Unmatched line #{ line }"
+          log "Unmatched line #{ line }"
         end
       end
     end
   end
-  def wiki_url(time=Time.now)
-    time.strftime("Portal:Current_events/%Y_%B_%d")
+  def wiki_url(date=Date.current)
+    date.strftime("Portal:Current_events/%Y_%B_%-d")
   end
-  # def append_to_
+  def log(*args)
+    return
+  end
 end
