@@ -1,5 +1,10 @@
 require 'mediawiki_api'
 require 'active_support/core_ext/date/calculations.rb'
+require 'active_support/core_ext/hash/keys.rb'
+require 'redcarpet'
+require 'mail'
+require 'yaml'
+require 'io/console'
 
 require_relative 'hash_path'
 
@@ -32,8 +37,86 @@ class Trbial
     parse_wiki_page(response)
     log "Finished #{ date.to_s }"
   end
+  
+  def export_events(filename="events")
+    raise "Retrieve events first before exporting" if @events.empty?
+    file = File.open(filename + ".txt", "w")
+    @events.each do |category, entries|
+      file.puts "\n\n**#{ category }**\n\n"
+      entries.keys.sort.each do |heading|
+        pos = heading.pos - 1
+        # heading_bullet = ("*" * pos)
+        heading_bullet = "*"
+        heading_bullet = ("  " * (pos - 1)) + heading_bullet if pos > 0
+        file.puts "#{ heading_bullet } #{ heading.item }" unless heading.root?
+        entries[heading].each do |event|
+          bullet = heading_bullet
+          bullet = "  #{ heading_bullet }" unless heading.root?
+          event = markdown_external_urls(event)
+          file.puts "#{ bullet } #{ event }"
+        end
+      end
+    end
+    file.close
+    file = File.open(file.path)
+    output = File.open(filename + ".html", "w")
+    markdown = Redcarpet::Markdown.new(Redcarpet::Render::HTML)
+    output << markdown.render(file.read)
+    file.close
+    output.close
+  end
+  
+  def send_events
+    raise "No events to send. Export events first." unless event_files_exist?
+    initialize_mail_client
+    text_file = File.open("events.txt")
+    html_file = File.open("events.html")
+    options = @mail_options[:message]
+    options[:subject].gsub!(/@[A-Za-z0-9_]+/) do |match|
+      instance_variable_get match
+    end
+
+    mail = Mail.deliver do
+      to options[:to]
+      from options[:from]
+      subject options[:subject]
+      
+      text_part do
+        body text_file.read
+      end
+      
+      html_part do
+        body html_file.read
+      end
+    end
+  end
 
 protected
+  def event_files_exist?
+    File.exists?("events.txt") && File.exists?("events.html")
+  end
+  def load_mail_options
+    @mail_options = YAML.load_file("mail_options.yml")
+    @mail_options.deep_symbolize_keys!
+  end
+
+  def initialize_mail_client
+    load_mail_options
+    options = {}
+    request_password
+    options.merge!(@mail_options[:smtp])
+
+    Mail.defaults do
+      delivery_method :smtp, options
+    end
+  end
+  
+  def request_password
+    return if @mail_options[:smtp][:password]
+    puts "Enter password for #{ @mail_options[:smtp][:user_name] }@#{ @mail_options[:smtp][:address]}:"
+    @mail_options[:smtp][:password] = STDIN.noecho(&:gets).strip
+  end
+
   def initialize_wiki_client
     @client ||= MediawikiApi::Client.new "https://en.wikipedia.org/w/api.php"
   end
@@ -80,12 +163,9 @@ protected
           current_level, current_heading = 0, HashPath.new
         else
           # Heading
+          heading = remove_wiki_urls(heading)
+
           level = level.length
-          
-          #TODO: Review logic here, need to handle specific cases where there are multiple WikiPageURLs in a heading e.g. * [[Page 1]], [[Page 2]]
-          if line.count("[[") > 1
-            heading = line.gsub!(/\[\[|\]\]|^\*+/, "")
-          end
           if level > current_level
             current_heading = HashPath.descend(current_heading, heading)
           else
@@ -99,18 +179,23 @@ protected
         match = line.match(/(\*+)(.+)/)
         if match
           level, text = match.captures
-          unless text
+          unless text 
             log "matched bullet, not text for line: #{ line }"
             next
           end
+          text = remove_wiki_urls(text)
           level = level.length
-          text.strip!
-          if current_heading.pos != level
-            # log "Mismatched levels. Heading pos: #{ current_heading.pos }, level: #{ level } for\n  '#{ line }'"
+          if current_heading.pos != level 
             current_heading = HashPath.up_to(current_heading, level - 1)
-            @events[current_category][current_heading] ||= []
           end
-          @events[current_category][current_heading] << text
+          @events[current_category][current_heading] ||= []
+          begin
+            @events[current_category][current_heading] << text
+          rescue
+            puts current_category
+            puts current_heading.inspect
+            puts text
+          end
         else
           log "Unmatched line #{ line }"
         end
@@ -122,5 +207,16 @@ protected
   end
   def log(*args)
     return
+  end
+  def remove_wiki_urls(text)
+    text.strip!
+    text.gsub!(/\s+/, ' ')
+    text.gsub!(/\[\[[^|\]]+\|([^|\]]+)\]\]/, '\1')
+    text.gsub!(/\[\[|\]\]/, "")
+    text
+  end
+  def markdown_external_urls(text)
+    text.gsub!(/\[(http[s]*:\/\/[^ \(]+)\s*\(([^\)]+)\)\]/, '[\2](\1)')
+    text
   end
 end

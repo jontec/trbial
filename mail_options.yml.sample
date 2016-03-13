@@ -1,0 +1,13 @@
+smtp:
+  address: smtp.gmail.com
+  port: 587
+  domain: gmail.com
+  user_name: <user name>
+## Password will be requested at run time if this is left blank.
+#  password:
+  authentication: plain
+  enable_starttls_auto: true
+message:
+  to: Your Name <address@gmail.com>
+  from: Trbial <trbial@domain.com>
+  subject: 'Trbial: Current Events for the past @days days'

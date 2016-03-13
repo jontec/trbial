@@ -38,7 +38,7 @@ class Trbial
     puts message
   end
 
-  def dump_events(filename="events.txt")
+  def dump_events(filename="output.txt")
     file = File.open(filename, "w")
     inspect_events(file)
     file.close

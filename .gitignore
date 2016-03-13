@@ -1,2 +1,4 @@
 cache
 *.txt
+*.html
+mail_options.yml
