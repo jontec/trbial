@@ -30,4 +30,5 @@ t.send_events # Sends the digest e-mail. See configuration details below
 ## Configuring the Mail Client
 
 The mail client uses configuration settings in the `mail_options.yml` file. A sample is provided as `mail_options.yml.sample`, tailormade for working with a personal GMail address.
-You can get started right away by renaming the sample, entering your user name, and updating the message details. You can choose to enter your password, or as is the default, let trbial prompt you on the command line when it's ready to send your digest.
+
+Get started right away by renaming the sample, entering your user name, and updating the message details. You can choose to enter your password, or as is the default, let trbial prompt you on the command line when it's ready to send your digest.

@@ -1,7 +1,15 @@
 require 'mediawiki_api'
 require 'active_support/core_ext/date/calculations.rb'
 require 'active_support/core_ext/hash/keys.rb'
-require 'redcarpet'
+begin
+  require 'redcloth'
+rescue
+  require 'redcarpet'
+else
+  TRBIAL_PARSER = :textile
+ensure
+  TRBIAL_PARSER ||= :markdown
+end
 require 'mail'
 require 'yaml'
 require 'io/console'
@@ -42,26 +50,40 @@ class Trbial
     raise "Retrieve events first before exporting" if @events.empty?
     file = File.open(filename + ".txt", "w")
     @events.each do |category, entries|
-      file.puts "\n\n**#{ category }**\n\n"
+      file.puts format_category(category)
       entries.keys.sort.each do |heading|
         pos = heading.pos - 1
-        # heading_bullet = ("*" * pos)
-        heading_bullet = "*"
+        if using_textile?
+          heading_bullet = pos == 0 ? "*" : ("*" * pos)
+        else
+          heading_bullet = "*"
+        end
         heading_bullet = ("  " * (pos - 1)) + heading_bullet if pos > 0
-        file.puts "#{ heading_bullet } #{ heading.item }" unless heading.root?
+        file.puts format_list_item(heading_bullet, heading.item) unless heading.root?
         entries[heading].each do |event|
-          bullet = heading_bullet
-          bullet = "  #{ heading_bullet }" unless heading.root?
-          event = markdown_external_urls(event)
-          file.puts "#{ bullet } #{ event }"
+          bullet = heading.root? ? heading_bullet : format_child_bullet(heading_bullet)
+          event = replace_external_urls(event)
+          file.puts format_list_item(bullet, event)
         end
       end
     end
     file.close
     file = File.open(file.path)
     output = File.open(filename + ".html", "w")
-    markdown = Redcarpet::Markdown.new(Redcarpet::Render::HTML)
-    output << markdown.render(file.read)
+    output.puts "<html>\n<head>\n<style type=\"text/css\">
+ul {
+  padding-left: 5px;
+}
+li {
+  padding: 2px 0px;
+}
+li a, li a:link {
+  text-decoration: none;
+  color: #000000;
+}
+</style>\n</head>\n<body>\n"
+    output.puts parse_file(file)
+    output.puts "</body>\n</html>"
     file.close
     output.close
   end
@@ -215,8 +237,48 @@ protected
     text.gsub!(/\[\[|\]\]/, "")
     text
   end
-  def markdown_external_urls(text)
-    text.gsub!(/\[(http[s]*:\/\/[^ \(]+)\s*\(([^\)]+)\)\]/, '[\2](\1)')
+  def replace_external_urls(text)
+    first = true
+    format = using_textile? ? '"\2":\1' : '[\2](\1)'
+    text.gsub!(/\[(http[s]*:\/\/[^ \(]+)\s*\(([^\)]+)\)\]/) do |match|
+      next unless first
+      first = false
+      using_textile? ? "\"#{ $2 }\":#{ $1 }" : "[#{ $2 }](#{ $1 })"
+    end
+    text.gsub!(/,*\s+$/, "")
     text
+  end
+  def self.parser
+    TRBIAL_PARSER
+  end
+  def using_textile?
+    self.class.parser == :textile
+  end
+  def uses_textile?
+    using_textile?
+  end
+  def format_category(text)
+    using_textile? ? "\n*#{ text }*\n\n": "\n\n**#{ text }**\n\n"
+  end
+  def format_list_item(bullet, text)
+    if using_textile?
+      "#{ bullet } #{ text }"
+    else
+      "#{ bullet } #{ text }"
+    end
+  end
+  def format_child_bullet(bullet)
+    bullet = "  #{ bullet }"
+    bullet += "*" if using_textile?
+    bullet
+  end
+  def parse_file(file)
+    case self.class.parser
+      when :textile
+        RedCloth.new(file.read).to_html
+      when :markdown
+        markdown = Redcarpet::Markdown.new(Redcarpet::Render::HTML)
+        markdown.render(file.read)
+    end
   end
 end
