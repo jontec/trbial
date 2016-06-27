@@ -3,7 +3,7 @@ require 'active_support/core_ext/date/calculations.rb'
 require 'active_support/core_ext/hash/keys.rb'
 begin
   require 'redcloth'
-rescue
+rescue LoadError
   require 'redcarpet'
 else
   TRBIAL_PARSER = :textile
